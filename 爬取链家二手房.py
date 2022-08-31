@@ -9,10 +9,43 @@ import random
 import pandas as pd
 from pyquery import PyQuery as pq
 import json
+import pymysql
+from sqlalchemy import create_engine
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54"
 }
+
+def get_proxies():
+    """
+    此函数用来获取可用的ip地址
+    :return: 返回一个proxies_list列表
+    """
+    proxies_list = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54"
+    }
+    response = requests.get("https://www.beesproxy.com/free",headers=headers).text
+    doc_obj = pq(response)
+    ip = doc_obj("#article-copyright > figure > table > tbody > tr >td:nth-child(1)").items()
+    port = doc_obj("#article-copyright > figure > table > tbody > tr >td:nth-child(2)").items()
+    for j,k in zip(ip,port):
+        url = "http://www.baidu.com"
+        ip, port = j.text(),k.text()
+        proxy = {'http':f"{ip}:{port}"}
+        # print(proxy)
+        try:
+            res = requests.get(url, proxies=proxy, headers=headers,timeout=2)
+            print(res.status_code)
+            if res.status_code == 200:
+                proxies_list.append(proxy)
+        except:
+            print(f"{proxy}响应失败")
+        continue
+    # print(proxies_list)
+    return proxies_list   #返回了一个代理ip列表
+
+
 # 1.发出请求获取源码
 def get_urls(baseurl):
     """
@@ -63,12 +96,29 @@ def get_info(url):
     print('\n')
     print(f"{name}共拿到{len(urls)}个房屋信息")  # 已经获取到一个页面的详情页
     return urls
-
-
+def urls_groups(url_list,n):
+    """
+    分割一大块urls
+    :param url_list: 传入一个总的url_list
+    :param n: 每个列表包含n个元素
+    :return: 分割后的多个含n个元素的列表
+    """
+    urls_groups = []
+    for a in range(0, len(url_list), n):
+        url_groups = url_list[a:a + n]
+        urls_groups.append(url_groups)
+    return urls_groups
 
 # 2.数据提取
-def get_content(url):
+def get_content(url,proxies):
+    """
+    获取单页的详情数据
+    :param url: 单页链接
+    :param proxies: 一个代理ip
+    :return: 一个字典格式的详细数据内容
+    """
     response = requests.get(url,headers=headers).text
+    print(proxies)
     doc_obj = pq(response)
     # 获取主要信息
     # main_info = doc_obj('body > div.overview > div.content')
@@ -121,8 +171,19 @@ def get_content(url):
 
 # 3.数据存储(excel)
 def save_data(info_list):
+    """
+    用pandas将数据存储为一个csv格式，一并存储到mysql中
+    :param info_list: 爬取的数据信息[{}]格式
+    :return:
+    """
     data = pd.DataFrame(info_list)
     data.to_csv("链家二手房信息.csv",encoding="utf_8_sig")      #记得to_csv选择encoding
+    print(data.head(10))
+    conn = create_engine('mysql+pymysql://root:xin010727@localhost:3306/lianjia_house')  #pymysql链接数据库
+    try:
+        data.to_sql('zhengzhou_jinshuiqu', conn, if_exists='replace', index=False)
+    except:
+        print('error')
 
 
 # url = "https://zz.lianjia.com/ershoufang/104109115486.html"
@@ -135,16 +196,14 @@ for i in urls:
         # print(url)
         main_urls = get_info(url)
         # print(main_urls)
-        time.sleep(1)
+        time.sleep(round(random.uniform(0.05,0.1),2))
         info_url_list = info_url_list + main_urls
-    # break
+    break
 print(info_url_list,f"总共拿到{len(info_url_list)}个网页信息，接下来将开始爬取数据")
-for url_info in info_url_list:
-    info = get_content(url_info)
-    info_list.append(info)
-    time.sleep(0.01)       #设置休眠时间
+urls_group = urls_groups(info_url_list,1000)      # 将3000个元素分成三组，每组1000个
+proxies_list = get_proxies()
+for group in urls_group:
+    for url_info in group:
+        info = get_content(url_info,proxies=random.choice(proxies_list))
+        info_list.append(info)
 save_data(info_list)
-
-
-
-
