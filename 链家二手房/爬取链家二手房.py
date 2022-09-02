@@ -11,6 +11,7 @@ from pyquery import PyQuery as pq
 import json
 import pymysql
 from sqlalchemy import create_engine
+from multiprocessing.dummy import Pool
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54"
@@ -49,7 +50,7 @@ def get_proxies():
 # 1.发出请求获取源码
 def get_urls(baseurl):
     """
-    得到一个区的所有url
+    得到每个区所对应的url
     :param baseurl: 基本地区
     :return: 形如[{"金水区":'url'},{"XX区":"url"}]的元素为字典的列表
     """
@@ -66,15 +67,14 @@ def get_urls(baseurl):
     # print(urls)
     return urls
 
-def get_info(url):
+def get_info(url,proxy):
     """
-    得到一页内容
+    得到地区主页内容
     :param url: 每个区的url
     :return: 每个区的数据
     """
-    #这里应该有个循环
     init_url = url
-    response = requests.get(url,headers=headers).text
+    response = requests.get(url,headers=headers,proxies=proxy).text
     doc_obj = pq(response)
     num_page = doc_obj('#content > div.leftContent > div.contentBottom.clear > div.page-box.fr > div').attr(
         "page-data")  # 获取总页数
@@ -166,6 +166,7 @@ def get_content(url,proxies):
     base_content = dict(base_attribute, **transaction_attribute)
     all_content = dict(info_dict,**base_content)
     print(all_content)
+    time.sleep(2)
     return all_content               #返回一个{"title":"content"}字典保存单页数据，至此已经能完成单页数据获取
 
 
@@ -185,25 +186,35 @@ def save_data(info_list):
     except:
         print('error')
 
-
-# url = "https://zz.lianjia.com/ershoufang/104109115486.html"
-baseurl = "https://zz.lianjia.com/ershoufang/rs/"
-urls = get_urls(baseurl)     # 得到了一个 [{name:url}] 形式的列表
-info_url_list = []           # 详情页的链接
-info_list = []               # 详情页数据
-for i in urls:
-    for url in i.values():
-        # print(url)
-        main_urls = get_info(url)
-        # print(main_urls)
-        time.sleep(round(random.uniform(0.05,0.1),2))
-        info_url_list = info_url_list + main_urls
-    break
-print(info_url_list,f"总共拿到{len(info_url_list)}个网页信息，接下来将开始爬取数据")
-urls_group = urls_groups(info_url_list,1000)      # 将3000个元素分成三组，每组1000个
-proxies_list = get_proxies()
-for group in urls_group:
-    for url_info in group:
-        info = get_content(url_info,proxies=random.choice(proxies_list))
+def run_webCrawler():
+    baseurl = "https://zz.lianjia.com/ershoufang/rs/"
+    print("正在获取代理ip...")
+    proxies_list = get_proxies()
+    print(proxies_list)
+    urls = get_urls(baseurl)  # 得到了一个 [{name:url}] 形式的列表
+    info_url_list = []  # 详情页的链接
+    info_list = []  # 详情页数据
+    for i in urls:
+        for url in i.values():
+            main_urls = get_info(url,proxy=random.choice(proxies_list))
+            time.sleep(round(random.uniform(0.05, 0.1), 2))
+            info_url_list = info_url_list + main_urls
+        break       #因为内容太多了，所以只选择了一个区。
+    print(info_url_list, f"总共拿到{len(info_url_list)}个网页信息，接下来将开始爬取数据")
+    # urls_group = urls_groups(info_url_list,1000)      # 将3000个元素分成三组，每组1000个
+    print("开始多线程爬虫")
+    # for group in urls_group:
+    #     for url_info in group:
+    start = time.time()
+    def multi_webCrawler(url):
+        info = get_content(url,proxies=random.choice(proxies_list))
         info_list.append(info)
-save_data(info_list)
+    pools = Pool(9)
+    pools.map(multi_webCrawler,info_url_list)
+    save_data(info_list)
+    end = time.time()
+    print(f"共用时{end - start}")
+
+if __name__ == '__main__':
+    print("开始运行")
+    run_webCrawler()
